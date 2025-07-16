@@ -1,52 +1,87 @@
 const express = require("express")
-const User = require("../models/users")
 const router = express.Router()
+const { User } = require("../models/users")
+const bcrypt = require("bcrypt")
+const jwt = require("jsonwebtoken")
+const authenticateToken = require("../middlewares/authenticateToken")
+const authorizeRole = require("../middlewares/authorizeRole")
+const saultRounds = 10
+const JWTKeyWord = "ArtoniSessioni44MeiFortiDeriTash$$_kthesaKamzes__$"
 
-
-const validator = require("validator")
-
-
-router.post("/login", async (req, res) => {
+router.get('/me', authenticateToken, authorizeRole("admin"), async (req, res) => {
     try {
-        let { email, password } = req.body
-        if (!email || !password) {
-            return res.status(400).json({ message: "Ju lutem drgoni emailin dhe passwordin!" })
-        }
-        email = validator.normalizeEmail(email);
-        if (!validator.isEmail(email)) {
-            return res.status(400).json({ message: "Email nuk eshte valid!" });
-        }
-        password = validator.trim(password);
-        const foundUser = await User.findOne({ email: String(email), password: String(password) }) // SQL DB QUERY
-        // const foundUser = await User.findOne({ email: String(email), password: String(password) }) //MONGO QUERY
-        if (!foundUser) {
-            return res.status(400).json({ message: "Nuk egziston nje user me kete email!" })
-        }
+        // const token = req?.headers?.authorization?.split(" ")[1]
+        // if (!token) {
+        //     return res.status(400).json({ message: "token not provided" })
+        // }
+        const foundUser = await User.findOne({ _id: req.user._id })
+        res.status(200).json({ message: "Your info fetched successfully!, ", data: foundUser })
 
-        if (String(foundUser.password) !== String(password)) {
-            return res.status(403).json({ message: "Passwordi eshte gabim!" })
-        }
-
-        return res.status(200).json({ message: "Login Sucessfull!", data: foundUser })
+        console.log("token", token)
     } catch (error) {
-        console.log("error", error)
+        console.log("Personale info error: ", error)
         res.status(500).json({ message: "Internal server error!" })
     }
 })
 
-let comments = []
 
-router.post("/coments", (req, res) => {
-    let { comment } = req.body
-    comments.push(comment)
-    res.send("komentove me suksee")
-})
-router.get("/coments", (req, res) => {
-    let { comment } = req.body
-    comments.push(comment)
-    res.send("komentove me suksee")
-})
 
+router.post('/login', async (req, res) => {
+    try {
+        const { email, password } = req.body
+        const foundUser = await User.findOne({ email })
+        if (!foundUser) {
+            return res.status(400).json({ message: "Nuk egzsiton nje perdorues me kete email!" })
+        }
+        const isMatch = await bcrypt.compare(password, foundUser.password)
+        if (!isMatch) {
+            return res.status(403).json({ message: "Passwordi eshte gabim!" })
+        }
+        const returnInfo = foundUser.toObject()
+        delete returnInfo.password
+        delete returnInfo.__v
+        const token = jwt.sign(returnInfo, JWTKeyWord)
+        res.status(200).json({
+            message: "U verifikuat me sukses",
+            token
+        })
+    } catch (error) {
+        console.log("Login error: ", error)
+        res.status(500).json({ message: "Internal server error!" })
+    }
+})
+router.post('/register', async (req, res) => {
+    try {
+        console.log("req.body", req.body)
+        const { first_name, last_name, email, password, age, role } = req.body
+        if (!first_name || !last_name || !email || !password || !age || !role) {
+            return res.status(400).json({ message: "Emri, mbiemri emaila passwordi mosha dhe roli jane fusha te detyrueshme!" })
+        }
+
+        try {
+            bcrypt.hash(password, saultRounds, async function (err, hash) {
+                if (err) {
+                    return res.status(403).json({ message: `Internal Server Error!` })
+
+                }
+                const newUser = new User({ first_name, last_name, email, password: hash, age, role })
+                await newUser.save(newUser)
+            })
+        }
+        catch (error) {
+            if (error.errorResponse.code === 11000) {
+                return res.status(403).json({ message: `A user exists with ${JSON.stringify(error.errorResponse.keyValue)}` })
+            } else {
+                return res.status(500).json({ message: `Unknon error ocoured!` })
+            }
+        }
+        return res.status(200).json({ message: "Useri u krijua me suskes" })
+
+    } catch (error) {
+        console.log("Register error: ", error)
+        res.status(500).json({ message: "Internal server error!" })
+    }
+})
 
 
 module.exports = router
